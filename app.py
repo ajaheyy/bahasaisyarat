@@ -11,6 +11,8 @@ os.makedirs("static", exist_ok=True)
 
 # Load ONNX model menggunakan OpenCV DNN
 net = cv2.dnn.readNetFromONNX("model/my_model.onnx")
+net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
 # Daftar nama kelas SIBI (A-Z)
 CLASSES = [chr(i) for i in range(65, 91)]  # ['A', 'B', ..., 'Z']
