@@ -262,13 +262,13 @@
 					isProcessing = true;
 
 					let canvas = document.createElement("canvas")
-					canvas.width = 640
-					canvas.height = 480
+					canvas.width = 320
+					canvas.height = 240
 
 					let ctx = canvas.getContext("2d")
-					ctx.drawImage(video, 0, 0, 640, 480)
+					ctx.drawImage(video, 0, 0, 320, 240)
 
-					let dataURL = canvas.toDataURL("image/jpeg")
+					let dataURL = canvas.toDataURL("image/jpeg", 0.5)
 
 					fetch("/predict-frame", {
 						method: "POST",

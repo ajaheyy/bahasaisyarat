@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 import base64
+import threading
 from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
@@ -14,14 +15,19 @@ net = cv2.dnn.readNetFromONNX("model/my_model.onnx")
 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
 net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
+# Thread lock untuk pengamanan pemanggilan net.forward() lintas thread
+net_lock = threading.Lock()
+
 # Daftar nama kelas SIBI (A-Z)
 CLASSES = [chr(i) for i in range(65, 91)]  # ['A', 'B', ..., 'Z']
 
 def run_inference(img):
     # Preprocessing image untuk YOLOv8 (imgsz=320)
     blob = cv2.dnn.blobFromImage(img, 1/255.0, (320, 320), swapRB=True, crop=False)
-    net.setInput(blob)
-    outputs = net.forward()
+    
+    with net_lock:
+        net.setInput(blob)
+        outputs = net.forward()
     
     # Format output YOLOv8: [1, 30, 2100] (di mana 30 = 4 box koordinat + 26 class probabilities)
     # Kita ambil deteksi dengan skor tertinggi
