@@ -2,4 +2,7 @@ flask
 gunicorn
 opencv-python-headless
 numpy
-onnxruntime
+ultralytics
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
