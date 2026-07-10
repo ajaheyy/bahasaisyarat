@@ -2,7 +2,7 @@ import os
 import cv2
 import numpy as np
 import base64
-import threading
+import onnxruntime as ort
 from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
@@ -10,40 +10,45 @@ app = Flask(__name__)
 # Pastikan folder static ada untuk menyimpan file upload
 os.makedirs("static", exist_ok=True)
 
-# Load ONNX model menggunakan OpenCV DNN
-net = cv2.dnn.readNetFromONNX("model/my_model.onnx")
-net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+# Load ONNX model menggunakan ONNX Runtime (jauh lebih cepat dari OpenCV DNN)
+# Optimize session options untuk speed maksimal
+opts = ort.SessionOptions()
+opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+opts.intra_op_num_threads = os.cpu_count() or 4
+opts.inter_op_num_threads = 2
+opts.execution_mode = ort.ExecutionMode.ORT_PARALLEL
 
-# Thread lock untuk pengamanan pemanggilan net.forward() lintas thread
-net_lock = threading.Lock()
+session = ort.InferenceSession(
+    "model/my_model.onnx",
+    providers=["CPUExecutionProvider"],
+    sess_options=opts
+)
+input_name = session.get_inputs()[0].name
 
 # Daftar nama kelas SIBI (A-Z)
 CLASSES = [chr(i) for i in range(65, 91)]  # ['A', 'B', ..., 'Z']
 
 def run_inference(img, draw_on_image=True):
-    """Run YOLOv8 inference on an image.
-    
-    Args:
-        img: Input image (BGR format)
-        draw_on_image: Whether to draw bounding box on the image (for upload mode)
-    """
+    """Run YOLOv8 inference on an image using ONNX Runtime."""
     h, w = img.shape[:2]
     
-    # Preprocessing image untuk YOLOv8 (imgsz=320)
-    blob = cv2.dnn.blobFromImage(img, 1/255.0, (320, 320), swapRB=True, crop=False)
+    # Preprocessing: resize, normalize, BGR->RGB, HWC->CHW, add batch dim
+    resized = cv2.resize(img, (320, 320))
+    blob = resized.astype(np.float32) / 255.0
+    blob = blob[:, :, ::-1]  # BGR -> RGB
+    blob = np.transpose(blob, (2, 0, 1))  # HWC -> CHW
+    blob = np.expand_dims(blob, axis=0)  # (1, 3, 320, 320)
+    blob = np.ascontiguousarray(blob)
     
-    with net_lock:
-        net.setInput(blob)
-        outputs = net.forward()
+    # Run ONNX Runtime inference
+    outputs = session.run(None, {input_name: blob})
     
-    # Format output YOLOv8: [1, 30, 2100] (30 = 4 box coords + 26 class probs)
-    # Vectorized NumPy — no Python loop over 2100 predictions
-    predictions = outputs[0].T  # shape: (2100, 30)
+    # Vectorized post-processing
+    predictions = outputs[0][0].T  # shape: (2100, 30)
     
-    scores_matrix = predictions[:, 4:]          # (2100, 26)
-    class_ids = np.argmax(scores_matrix, axis=1)  # (2100,)
-    max_scores = scores_matrix[np.arange(len(class_ids)), class_ids]  # (2100,)
+    scores_matrix = predictions[:, 4:]
+    class_ids = np.argmax(scores_matrix, axis=1)
+    max_scores = scores_matrix[np.arange(len(class_ids)), class_ids]
     
     # Filter by confidence threshold
     mask = max_scores > 0.4
