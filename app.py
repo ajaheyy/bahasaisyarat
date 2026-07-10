@@ -10,8 +10,7 @@ app = Flask(__name__)
 # Pastikan folder static ada untuk menyimpan file upload
 os.makedirs("static", exist_ok=True)
 
-# Load ONNX model menggunakan ONNX Runtime (jauh lebih cepat dari OpenCV DNN)
-# Optimize session options untuk speed maksimal
+# Load ONNX model menggunakan ONNX Runtime (lebih cepat dari OpenCV DNN)
 opts = ort.SessionOptions()
 opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 opts.intra_op_num_threads = os.cpu_count() or 4
@@ -32,15 +31,10 @@ def run_inference(img, draw_on_image=True):
     """Run YOLOv8 inference on an image using ONNX Runtime."""
     h, w = img.shape[:2]
     
-    # Preprocessing: resize, normalize, BGR->RGB, HWC->CHW, add batch dim
-    resized = cv2.resize(img, (320, 320))
-    blob = resized.astype(np.float32) / 255.0
-    blob = blob[:, :, ::-1]  # BGR -> RGB
-    blob = np.transpose(blob, (2, 0, 1))  # HWC -> CHW
-    blob = np.expand_dims(blob, axis=0)  # (1, 3, 320, 320)
-    blob = np.ascontiguousarray(blob)
+    # Preprocessing pakai cv2.dnn.blobFromImage (terbukti benar, hasilnya identik)
+    blob = cv2.dnn.blobFromImage(img, 1/255.0, (320, 320), swapRB=True, crop=False)
     
-    # Run ONNX Runtime inference
+    # Inference pakai ONNX Runtime (lebih cepat dari cv2.dnn.forward)
     outputs = session.run(None, {input_name: blob})
     
     # Vectorized post-processing
