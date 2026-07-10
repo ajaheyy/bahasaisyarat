@@ -5,6 +5,13 @@ import base64
 from flask import Flask, request, jsonify, render_template
 from ultralytics import YOLO
 
+# Optimasi PyTorch CPU Threading untuk mencegah CPU contention/overhead di web server
+try:
+    import torch
+    torch.set_num_threads(1)
+except ImportError:
+    pass
+
 app = Flask(__name__)
 
 # Pastikan folder static ada untuk menyimpan file upload
@@ -29,6 +36,7 @@ def predict_image():
     filepath = "static/upload.jpg"
     file.save(filepath)
 
+    # Tetap gunakan 320 untuk upload gambar agar lebih presisi
     results = model(filepath, imgsz=320, verbose=False)
     results[0].save(filename="static/result.jpg")
 
@@ -53,8 +61,8 @@ def predict_frame():
     nparr = np.frombuffer(base64.b64decode(encoded), np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    # Inference cepat pakai Ultralytics
-    results = model(img, imgsz=320, verbose=False)
+    # Gunakan imgsz=224 (lebih kecil -> jauh lebih cepat di CPU, ~2x-3x speedup)
+    results = model.predict(img, imgsz=224, verbose=False)
 
     pred = "No detection"
     box = None

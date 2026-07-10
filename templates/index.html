@@ -263,7 +263,7 @@
 		let displayBox = null    // Currently rendered box [left, top, w, h]
 		let targetBox = null     // Latest server result
 		let currentPrediction = ""
-		const LERP_FACTOR = 0.4  // 0 = no movement, 1 = instant snap
+		const LERP_FACTOR = 0.75  // 0 = no movement, 1 = instant snap
 
 		// Lerp helper
 		function lerp(a, b, t) { return a + (b - a) * t }
@@ -315,8 +315,8 @@
 		}
 
 		// Send canvas dimensions matching model input for correct scaling
-		const SEND_W = 320
-		const SEND_H = 240
+		const SEND_W = 224
+		const SEND_H = 224
 
 		navigator.mediaDevices.getUserMedia({ 
 			video: { 
