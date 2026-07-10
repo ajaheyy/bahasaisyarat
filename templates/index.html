@@ -33,12 +33,74 @@
 			}
 
 			#gesture .button.primary:hover {
-			background: #ffafcc !important;
-			color: black !important;
+				background: #ffafcc !important;
+				color: black !important;
 			}
 
 			#header {
-			padding: 1em 0;
+				padding: 1em 0;
+			}
+
+			/* Fixes for mobile horizontal overflows and layout shifts */
+			img {
+				max-width: 100%;
+				height: auto;
+			}
+
+			#resultImage {
+				width: 100%;
+				max-width: 500px;
+				height: auto;
+				border-radius: 12px;
+				box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+			}
+
+			#result {
+				display: flex;
+				flex-wrap: wrap;
+				justify-content: center;
+				gap: 10px;
+				margin-top: 20px;
+				max-width: 100%;
+				padding: 0 10px;
+			}
+
+			#result img {
+				width: 120px;
+				height: auto;
+				margin: 0 !important;
+				border-radius: 8px;
+				box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+				transition: transform 0.2s ease;
+			}
+
+			#result img:hover {
+				transform: scale(1.05);
+			}
+
+			#webcamCanvas {
+				width: 100%; 
+				max-width: 640px; 
+				height: auto;
+				border-radius: 12px; 
+				box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+				border: 2px solid #ffafcc;
+				display: block;
+				margin: 0 auto;
+			}
+
+			#intro .spotlight img {
+				width: 100%;
+				max-width: 300px;
+				height: auto;
+				display: block;
+				margin: 20px auto 0 auto;
+			}
+
+			@media screen and (min-width: 769px) {
+				#intro .spotlight img {
+					margin: 0;
+				}
 			}
 
 			@media screen and (max-width: 768px) {
@@ -53,6 +115,13 @@
 				#header {
 					padding: 0.8em 0;
 				}
+
+				#textInput {
+					margin-right: 0 !important;
+					margin-bottom: 10px;
+					width: 100% !important;
+					max-width: 300px;
+				}
 			}
 
 			@media screen and (max-width: 480px) {
@@ -66,6 +135,10 @@
 
 				#header {
 					padding: 0.6em 0;
+				}
+
+				#result img {
+					width: 80px;
 				}
 			}
 			</style>
@@ -119,7 +192,7 @@
 
 								<!-- KANAN (GAMBAR) -->
 								<span>
-									<img src="/static/images/header.png" style="width:300px;">
+									<img src="/static/images/header.png" style="width: 100%; max-width: 300px; height: auto;">
 								</span>
 
 						</div>
@@ -151,7 +224,7 @@
 									margin-top: 15px;
 								"></p>
 
-								<img id="resultImage" width="500" style="margin-top:20px;">
+								<img id="resultImage" style="margin-top:20px;">
 							</section>
 
 						<!-- Realtime detection -->
@@ -435,13 +508,6 @@
 					if(/[A-Z]/.test(char)){
 						let img = document.createElement("img")
 						img.src = "/static/images/" + char + ".jpg"
-						img.width = 200
-
-						// 🔥 biar bagus
-						img.style.margin = "5px"
-						img.style.borderRadius = "8px"
-						img.style.boxShadow = "0 2px 6px rgba(0,0,0,0.2)"
-
 						result.appendChild(img)
 					}
 				})
