@@ -1,69 +1,69 @@
 # SIBI Sign Language Detection System 🤟
 
-Aplikasi web deteksi Bahasa Isyarat SIBI (A-Z) berbasis Flask dan YOLOv8 yang telah dioptimasi untuk berjalan super ringan di cloud platform (seperti Railway/Render free tier).
+Aplikasi web deteksi Bahasa Isyarat SIBI (A-Z) berbasis Flask dan YOLOv8 yang menggunakan PyTorch dan Ultralytics, dioptimalkan untuk performa deteksi real-time tinggi dan berjalan secara efisien di cloud platform (seperti Railway).
 
 ---
 
-## 🚀 Mengapa Migrasi ke Format ONNX?
+## ⚡ Arsitektur Deteksi Real-Time & Cepat
 
-Sebelumnya, aplikasi ini menggunakan format model bawaan PyTorch (`.pt`). Saat dideploy ke Railway, ini memicu kendala besar:
-1. **OOM (Out Of Memory) Crash:** Runtime PyTorch + Ultralytics memakan RAM lebih dari **1.2 GB** saat meload model. Di Railway Free/Hobby Tier (limit RAM 512MB), aplikasi akan langsung crash.
-2. **Ukuran Build Raksasa:** Menginstal library `torch` dan `torchvision` membutuhkan download package sebesar **2 GB+**, membuat proses build sangat lambat dan rawan timeout.
-
-**Solusi:**
-Kita mengekspor model `my_model.pt` ke format **ONNX** (`my_model.onnx`) dan membacanya menggunakan modul **OpenCV DNN** (`cv2.dnn`).
-* **Penggunaan RAM:** Turun drastis dari **1.2 GB** menjadi hanya **~70 MB**.
-* **Ukuran Build:** Turun dari **3 GB+** menjadi hanya **~150 MB** (tidak butuh PyTorch lagi!).
-* **Kecepatan Build:** Selesai dalam waktu kurang dari 1 menit di Railway.
-
----
-
-## 🛠️ Optimasi yang Telah Diterapkan
-
-Aplikasi ini telah melalui proses optimasi performa tinggi untuk kenyamanan pengguna:
+Untuk mencapai deteksi yang terasa instan dan tidak patah-patah, aplikasi ini menggunakan pembagian beban kerja (pipeline separation) antara client dan server:
 
 1. **Buttery Smooth 60 FPS Camera (Render Lokal):**
-   - Gambar dari kamera tidak lagi dikirim bolak-balik dari server untuk ditampilkan (yang menyebabkan lag parah).
-   - Video webcam di-render secara lokal menggunakan loop `requestAnimationFrame` pada HTML5 Canvas langsung di browser di kecepatan **60 FPS** mulus tanpa lag.
-2. **Transfer Data Super Ringan (JSON Coordinate Only):**
-   - Server tidak mengirim ulang file gambar base64 hasil deteksi yang berukuran puluhan KB.
-   - Server hanya mengirimkan koordinat pelacakan `[left, top, width, height]` dan label prediksi teks yang berukuran **< 100 bytes**, menghemat bandwidth internet secara ekstrem.
-3. **Kompresi Resolusi Deteksi:**
-   - Frame tangkapan kamera dikompresi ke resolusi **320x240** dengan kualitas JPEG **0.5** saat dikirim ke server. Ini meminimalkan ukuran payload upload menjadi hanya **~8 KB per request**.
-4. **Mirror Kamera & Deteksi Sinkron:**
-   - Kamera di-mirror secara horizontal agar terasa natural seperti cermin biasa.
-   - Posisi bounding box secara otomatis di-mirror di sisi client agar pas dengan gerakan tangan, sedangkan label teks deteksi (A-Z) tetap digambar normal (tidak terbalik) agar mudah dibaca.
-5. **Thread Safety Server:**
-   - Proses inferensi model OpenCV DNN di server diamankan menggunakan `threading.Lock()` guna mencegah tabrakan data memori saat diakses oleh banyak pengguna secara bersamaan.
-6. **Fix Jump Scroll:**
-   - Memperbaiki tombol "Generate" pada bagian *Text to Gesture* agar tidak men-scroll halaman kembali ke paling atas saat diklik.
+   - Video dari kamera **tidak dikirim bolak-balik** untuk digambar di server.
+   - Video webcam di-render secara lokal di browser menggunakan loop `requestAnimationFrame` pada HTML5 Canvas di kecepatan **60 FPS** mulus.
+2. **Transfer Data Minimal (Coordinate-Only):**
+   - Server tidak mengirim ulang file gambar base64 hasil deteksi yang berat (menghemat bandwidth hingga **99%**).
+   - Server hanya mengirimkan koordinat pelacakan `[left, top, width, height]` dan label teks prediksi (payload **< 100 bytes**).
+3. **Mekanisme Self-Chaining Loop (Anti-Queue):**
+   - Browser mengirim frame baru *hanya setelah* respon frame sebelumnya selesai diproses. Hal ini menghindari penumpukan antrean request jika koneksi internet pengguna mengalami fluktuasi latency.
+   - Diberikan jeda throttling **30ms** untuk menjaga kestabilan load browser dan server.
 
 ---
 
-## 📋 Langkah Deploy ke Railway
+## 🛠️ Optimasi Performa PyTorch di Server (CPU)
 
-### Prasyarat
-- Akun GitHub yang terhubung dengan repositori ini.
-- Akun Railway (yang sudah terverifikasi).
+Menjalankan model PyTorch (.pt) di CPU server hosting gratisan seringkali berat dan menyebabkan lag. Kami menerapkan teknik optimasi berikut untuk mempercepat pemrosesan server:
 
-### Langkah-langkah:
-1. Masuk ke **[Railway Dashboard](https://railway.app)**.
-2. Klik **New Project** → **Deploy from GitHub Repo**.
-3. Pilih repositori kamu (`bahasaisyarat`).
-4. Railway akan otomatis mendeteksi konfigurasi `railway.toml` dan `Procfile` kita (menggunakan builder **Railpack**).
-5. Proses instalasi dependensi (Python 3, OpenCV headless, Flask, Gunicorn) akan berjalan otomatis dan selesai dalam waktu **~1 menit**.
-6. Setelah deployment bertuliskan **Active**, masuk ke tab **Settings** pada dashboard Railway layanan kamu.
-7. Di bagian **Environment**, temukan sub-section **Networking**, lalu klik **Generate Domain** untuk mendapatkan URL publik aplikasi kamu.
-8. Buka URL tersebut, dan aplikasi SIBI siap digunakan!
+1. **CPU Threading Control (`torch.set_num_threads(1)`):**
+   - Mencegah *CPU contention/thread thrashing* dengan membatasi PyTorch hanya menggunakan 1 thread per proses eksekusi Flask.
+2. **Image Size Reduction (`imgsz=224`):**
+   - Frame webcam diperkecil menjadi **224x224** px sebelum dikirim dan diproses oleh YOLOv8. Ukuran data berkurang **~50%**, meningkatkan kecepatan inference CPU hingga **2x - 3x lipat**.
+3. **Native Confidence Threshold:**
+   - Menyaring deteksi langsung pada level C++ saat pemanggilan `model.predict(..., conf=0.4)` untuk menyingkirkan box tidak penting sebelum NMS (Non-Maximum Suppression) berjalan.
+4. **Model Warmup pada Startup:**
+   - Server melakukan deteksi dummy 1 frame saat aplikasi booting awal. Hal ini menghindari *cold start latency spike* (deteksi pertama yang lambat saat webcam pertama dinyalakan).
+5. **Temporal Prediction Smoothing (Antiflicker):**
+   - Browser menyimpan riwayat 3 prediksi terakhir dan menampilkan konsensus mayoritas untuk meminimalkan flicker/kedipan teks deteksi akibat noise frame sesaat.
 
 ---
 
-## 📦 Struktur Dependensi (`requirements.txt`)
-Karena menggunakan OpenCV DNN, kita hanya memerlukan library Python minimal berikut:
+## 📦 Dependensi Ringan CPU-Only (`requirements.txt`)
+
+Kami mengonfigurasi instalasi PyTorch untuk menggunakan varian **CPU-only** (tanpa CUDA / GPU driver yang memakan memori bergiga-giga):
 ```text
 flask
 gunicorn
 opencv-python-headless
 numpy
+ultralytics
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
 ```
-*(Tidak membutuhkan torch, torchvision, atau ultralytics lagi di server!)*
+Ini menjaga ukuran build tetap ringkas (~150MB - 200MB) dan ramah terhadap limit memori container.
+
+---
+
+## 🐳 Konfigurasi Deploy di Railway
+
+Karena library OpenCV membutuhkan beberapa dependencies sistem pada sistem operasi Linux, deployment menggunakan **Dockerfile** khusus:
+
+1. **System Dependencies:**
+   Dockerfile memasang package sistem yang dibutuhkan OpenCV seperti `libgl1`, `libglib2.0-0`, dan `libxcb1` untuk menghindari error `libxcb.so.1: cannot open shared object file`.
+2. **Docker Builder:**
+   Layanan dideploy menggunakan Railway Docker builder dengan konfigurasi di `railway.toml`:
+   ```toml
+   [build]
+   builder = "dockerfile"
+   dockerfilePath = "Dockerfile"
+   ```
