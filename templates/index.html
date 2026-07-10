@@ -264,9 +264,35 @@
 		let targetBox = null     // Latest server result
 		let currentPrediction = ""
 		const LERP_FACTOR = 0.75  // 0 = no movement, 1 = instant snap
+		
+		// Prediction smoothing history
+		let predHistory = []
+		const MAX_HISTORY = 3
 
 		// Lerp helper
 		function lerp(a, b, t) { return a + (b - a) * t }
+
+		// Helper to find most frequent prediction in history
+		function getSmoothedPrediction(newPred) {
+			predHistory.push(newPred)
+			if (predHistory.length > MAX_HISTORY) {
+				predHistory.shift()
+			}
+			
+			// Count frequencies
+			let counts = {}
+			let maxCount = 0
+			let bestPred = newPred
+			
+			for (let pred of predHistory) {
+				counts[pred] = (counts[pred] || 0) + 1
+				if (counts[pred] > maxCount) {
+					maxCount = counts[pred]
+					bestPred = pred
+				}
+			}
+			return bestPred
+		}
 
 		// Buttery smooth local video rendering loop (60 FPS)
 		function drawVideo() {
@@ -336,8 +362,7 @@
 			console.log("Camera error:", err)
 		})
 
-		// Self-chaining fetch: sends next frame IMMEDIATELY after response
-		// No fixed interval = maximum throughput, zero wasted time
+		// Self-chaining fetch: sends next frame IMMEDIATELY after response (with tiny throttle)
 		function sendFrame() {
 			if (video.readyState !== 4) {
 				// Video not ready yet, retry soon
@@ -361,6 +386,7 @@
 			})
 			.then(res => res.json())
 			.then(data => {
+				let smoothedPred = "No detection"
 				if (data.box) {
 					// Scale box coordinates from send resolution to canvas resolution
 					let scaleX = canvas.width / SEND_W
@@ -371,16 +397,18 @@
 						data.box[2] * scaleX,
 						data.box[3] * scaleY
 					]
-					currentPrediction = data.prediction
+					smoothedPred = getSmoothedPrediction(data.prediction)
 				} else {
 					targetBox = null
 					displayBox = null
-					currentPrediction = "No detection"
+					predHistory = [] // reset history when no detection
 				}
-				document.getElementById("hasilRealtime").innerText = data.prediction
+				
+				currentPrediction = smoothedPred
+				document.getElementById("hasilRealtime").innerText = smoothedPred
 
-				// Immediately send next frame — no waiting
-				sendFrame()
+				// Tiny 30ms delay to prevent browser layout engine & server network choking
+				setTimeout(sendFrame, 30)
 			})
 			.catch(err => {
 				console.log("Fetch error:", err)

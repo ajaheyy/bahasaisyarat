@@ -20,6 +20,9 @@ os.makedirs("static", exist_ok=True)
 # Load YOLOv8 model
 model = YOLO("model/my_model.pt")
 
+# Warmup model to prevent initial latency spike
+model.predict(np.zeros((224, 224, 3), dtype=np.uint8), imgsz=224, verbose=False)
+
 # Daftar nama kelas SIBI (A-Z)
 CLASSES = [chr(i) for i in range(65, 91)]  # ['A', 'B', ..., 'Z']
 
@@ -37,7 +40,7 @@ def predict_image():
     file.save(filepath)
 
     # Tetap gunakan 320 untuk upload gambar agar lebih presisi
-    results = model(filepath, imgsz=320, verbose=False)
+    results = model.predict(filepath, imgsz=320, conf=0.4, verbose=False)
     results[0].save(filename="static/result.jpg")
 
     pred = "No detection"
@@ -62,7 +65,7 @@ def predict_frame():
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     # Gunakan imgsz=224 (lebih kecil -> jauh lebih cepat di CPU, ~2x-3x speedup)
-    results = model.predict(img, imgsz=224, verbose=False)
+    results = model.predict(img, imgsz=224, conf=0.4, verbose=False)
 
     pred = "No detection"
     box = None
