@@ -248,106 +248,146 @@
 				})
 			}
 
-			
-			/* realtime */
-			window.addEventListener("load", () => {
+				/* realtime */
+		window.addEventListener("load", () => {
 
-			let video = document.getElementById("video")
-			let canvas = document.getElementById("webcamCanvas")
-			let ctx = canvas.getContext("2d")
+		let video = document.getElementById("video")
+		let canvas = document.getElementById("webcamCanvas")
+		let ctx = canvas.getContext("2d")
 
-			// Resolusi canvas render lokal
-			canvas.width = 640
-			canvas.height = 480
+		// Canvas render resolution
+		canvas.width = 640
+		canvas.height = 480
 
-			let currentBox = null
-			let currentPrediction = ""
+		// Smoothed bounding box state (lerp targets)
+		let displayBox = null    // Currently rendered box [left, top, w, h]
+		let targetBox = null     // Latest server result
+		let currentPrediction = ""
+		const LERP_FACTOR = 0.4  // 0 = no movement, 1 = instant snap
 
-			// Buttery smooth local video rendering loop (60 FPS)
-			function drawVideo() {
-				if (video.readyState === 4) {
-					// Draw video frame locally (mirrored horizontally)
-					ctx.save()
-					ctx.translate(canvas.width, 0)
-					ctx.scale(-1, 1)
-					ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-					ctx.restore()
-					
-					// Draw bounding box if present
-					if (currentBox) {
-						// Scale coordinates dari 320x240 (server) ke 640x480 (canvas)
-						let scaleX = canvas.width / 320
-						let scaleY = canvas.height / 240
-						
-						let rawLeft = currentBox[0] * scaleX
-						let width = currentBox[2] * scaleX
-						
-						// Mirror koordinat left agar pas dengan video yang di-mirror
-						let left = canvas.width - rawLeft - width
-						let top = currentBox[1] * scaleY
-						let height = currentBox[3] * scaleY
-						
-						ctx.strokeStyle = "#ffafcc"
-						ctx.lineWidth = 4
-						ctx.strokeRect(left, top, width, height)
-						
-						ctx.fillStyle = "#ffafcc"
-						ctx.font = "bold 20px 'Outfit', Arial, sans-serif"
-						ctx.fillText(currentPrediction, left, top - 10)
+		// Lerp helper
+		function lerp(a, b, t) { return a + (b - a) * t }
+
+		// Buttery smooth local video rendering loop (60 FPS)
+		function drawVideo() {
+			if (video.readyState === 4) {
+				// Draw video frame locally (mirrored horizontally)
+				ctx.save()
+				ctx.translate(canvas.width, 0)
+				ctx.scale(-1, 1)
+				ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+				ctx.restore()
+				
+				// Smoothly interpolate bounding box
+				if (targetBox) {
+					if (!displayBox) {
+						displayBox = [...targetBox]
+					} else {
+						displayBox[0] = lerp(displayBox[0], targetBox[0], LERP_FACTOR)
+						displayBox[1] = lerp(displayBox[1], targetBox[1], LERP_FACTOR)
+						displayBox[2] = lerp(displayBox[2], targetBox[2], LERP_FACTOR)
+						displayBox[3] = lerp(displayBox[3], targetBox[3], LERP_FACTOR)
 					}
+
+					let [left, top, width, height] = displayBox
+
+					// Mirror left coordinate for mirrored video
+					let mirroredLeft = canvas.width - left - width
+
+					// Draw bounding box
+					ctx.strokeStyle = "#ffafcc"
+					ctx.lineWidth = 3
+					ctx.strokeRect(mirroredLeft, top, width, height)
+					
+					// Draw label background
+					let label = currentPrediction
+					ctx.font = "bold 18px 'Outfit', Arial, sans-serif"
+					let textWidth = ctx.measureText(label).width
+					ctx.fillStyle = "rgba(255, 175, 204, 0.85)"
+					ctx.fillRect(mirroredLeft, top - 28, textWidth + 16, 26)
+					
+					// Draw label text
+					ctx.fillStyle = "#ffffff"
+					ctx.fillText(label, mirroredLeft + 8, top - 10)
 				}
-				requestAnimationFrame(drawVideo)
+			}
+			requestAnimationFrame(drawVideo)
+		}
+
+		// Send canvas dimensions matching model input for correct scaling
+		const SEND_W = 320
+		const SEND_H = 240
+
+		navigator.mediaDevices.getUserMedia({ 
+			video: { 
+				width: { ideal: 640 }, 
+				height: { ideal: 480 },
+				facingMode: "user"
+			} 
+		})
+		.then(stream => {
+			video.srcObject = stream
+			video.play()
+			requestAnimationFrame(drawVideo)
+			// Start the self-chaining inference loop
+			sendFrame()
+		})
+		.catch(err => {
+			console.log("Camera error:", err)
+		})
+
+		// Self-chaining fetch: sends next frame IMMEDIATELY after response
+		// No fixed interval = maximum throughput, zero wasted time
+		function sendFrame() {
+			if (video.readyState !== 4) {
+				// Video not ready yet, retry soon
+				setTimeout(sendFrame, 100)
+				return
 			}
 
-			navigator.mediaDevices.getUserMedia({ video: true })
-			.then(stream => {
-				video.srcObject = stream
-				video.play()
-				requestAnimationFrame(drawVideo)
+			let sendCanvas = document.createElement("canvas")
+			sendCanvas.width = SEND_W
+			sendCanvas.height = SEND_H
+			let sendCtx = sendCanvas.getContext("2d")
+			sendCtx.drawImage(video, 0, 0, SEND_W, SEND_H)
+
+			// Low quality JPEG for minimal bandwidth
+			let dataURL = sendCanvas.toDataURL("image/jpeg", 0.4)
+
+			fetch("/predict-frame", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ image: dataURL })
+			})
+			.then(res => res.json())
+			.then(data => {
+				if (data.box) {
+					// Scale box coordinates from send resolution to canvas resolution
+					let scaleX = canvas.width / SEND_W
+					let scaleY = canvas.height / SEND_H
+					targetBox = [
+						data.box[0] * scaleX,
+						data.box[1] * scaleY,
+						data.box[2] * scaleX,
+						data.box[3] * scaleY
+					]
+					currentPrediction = data.prediction
+				} else {
+					targetBox = null
+					displayBox = null
+					currentPrediction = "No detection"
+				}
+				document.getElementById("hasilRealtime").innerText = data.prediction
+
+				// Immediately send next frame — no waiting
+				sendFrame()
 			})
 			.catch(err => {
-				console.log("Camera error:", err)
+				console.log("Fetch error:", err)
+				// On error, retry after a short delay
+				setTimeout(sendFrame, 300)
 			})
-
-			let isProcessing = false;
-			setInterval(() => {
-				if (video.readyState === 4 && !isProcessing) {
-					isProcessing = true;
-
-					// Buat canvas kecil sementara untuk dikirim ke server (hemat bandwidth)
-					let sendCanvas = document.createElement("canvas")
-					sendCanvas.width = 320
-					sendCanvas.height = 240
-					let sendCtx = sendCanvas.getContext("2d")
-					sendCtx.drawImage(video, 0, 0, 320, 240)
-
-					let dataURL = sendCanvas.toDataURL("image/jpeg", 0.5)
-
-					fetch("/predict-frame", {
-						method: "POST",
-						headers: {
-							"Content-Type": "application/json"
-						},
-						body: JSON.stringify({ image: dataURL })
-					})
-					.then(res => res.json())
-					.then(data => {
-						if (data.box) {
-							currentBox = data.box // [left, top, width, height]
-							currentPrediction = data.prediction
-						} else {
-							currentBox = null
-							currentPrediction = "No detection"
-						}
-						document.getElementById("hasilRealtime").innerText = data.prediction
-						isProcessing = false;
-					})
-					.catch(err => {
-						console.log("Fetch error:", err);
-						isProcessing = false;
-					})
-				}
-			}, 150)
+		}
 
 		})
 

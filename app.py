@@ -21,7 +21,15 @@ net_lock = threading.Lock()
 # Daftar nama kelas SIBI (A-Z)
 CLASSES = [chr(i) for i in range(65, 91)]  # ['A', 'B', ..., 'Z']
 
-def run_inference(img):
+def run_inference(img, draw_on_image=True):
+    """Run YOLOv8 inference on an image.
+    
+    Args:
+        img: Input image (BGR format)
+        draw_on_image: Whether to draw bounding box on the image (for upload mode)
+    """
+    h, w = img.shape[:2]
+    
     # Preprocessing image untuk YOLOv8 (imgsz=320)
     blob = cv2.dnn.blobFromImage(img, 1/255.0, (320, 320), swapRB=True, crop=False)
     
@@ -29,48 +37,46 @@ def run_inference(img):
         net.setInput(blob)
         outputs = net.forward()
     
-    # Format output YOLOv8: [1, 30, 2100] (di mana 30 = 4 box koordinat + 26 class probabilities)
-    # Kita ambil deteksi dengan skor tertinggi
-    predictions = outputs[0]  # shape: (30, 2100)
-    predictions = np.transpose(predictions)  # shape: (2100, 30)
+    # Format output YOLOv8: [1, 30, 2100] (30 = 4 box coords + 26 class probs)
+    # Vectorized NumPy — no Python loop over 2100 predictions
+    predictions = outputs[0].T  # shape: (2100, 30)
     
-    best_class_id = -1
-    best_score = 0.0
-    best_box = None
+    scores_matrix = predictions[:, 4:]          # (2100, 26)
+    class_ids = np.argmax(scores_matrix, axis=1)  # (2100,)
+    max_scores = scores_matrix[np.arange(len(class_ids)), class_ids]  # (2100,)
     
-    for pred in predictions:
-        scores = pred[4:]
-        class_id = np.argmax(scores)
-        score = scores[class_id]
-        if score > 0.4 and score > best_score:  # threshold 0.4
-            best_score = score
-            best_class_id = class_id
-            best_box = pred[0:4]
-            
-    # Gambar bounding box jika terdeteksi
-    h, w = img.shape[:2]
-    pred_label = "No detection"
-    box_coords = None
+    # Filter by confidence threshold
+    mask = max_scores > 0.4
+    if not np.any(mask):
+        return img, "No detection", None
     
-    if best_class_id != -1 and best_box is not None:
-        pred_label = CLASSES[best_class_id]
-        # YOLOv8 format: [x_center, y_center, width, height] normalized to 320x320
-        # Kita sesuaikan ke ukuran gambar asli
-        x_center, y_center, box_w, box_h = best_box
-        x_factor = w / 320.0
-        y_factor = h / 320.0
-        
-        left = int((x_center - box_w / 2) * x_factor)
-        top = int((y_center - box_h / 2) * y_factor)
-        width = int(box_w * x_factor)
-        height = int(box_h * y_factor)
-        
-        # Gambar box dan label di image
-        cv2.rectangle(img, (left, top), (left + width, top + height), (180, 200, 255), 3)
+    # Get best detection
+    filtered_indices = np.where(mask)[0]
+    best_idx = filtered_indices[np.argmax(max_scores[mask])]
+    
+    best_class_id = int(class_ids[best_idx])
+    best_score = float(max_scores[best_idx])
+    best_box = predictions[best_idx, 0:4]
+    
+    pred_label = CLASSES[best_class_id]
+    
+    # YOLOv8 format: [x_center, y_center, width, height] relative to 320x320
+    x_center, y_center, box_w, box_h = best_box
+    x_factor = w / 320.0
+    y_factor = h / 320.0
+    
+    left = int((x_center - box_w / 2) * x_factor)
+    top = int((y_center - box_h / 2) * y_factor)
+    bw = int(box_w * x_factor)
+    bh = int(box_h * y_factor)
+    
+    box_coords = [left, top, bw, bh]
+    
+    if draw_on_image:
+        cv2.rectangle(img, (left, top), (left + bw, top + bh), (180, 200, 255), 3)
         cv2.putText(img, f"{pred_label} ({best_score:.2f})", (left, top - 10), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (180, 200, 255), 2)
-        box_coords = [left, top, width, height]
-                    
+    
     return img, pred_label, box_coords
 
 @app.route('/')
@@ -107,7 +113,7 @@ def predict_frame():
     nparr = np.frombuffer(base64.b64decode(encoded), np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    _, pred, box = run_inference(img)
+    _, pred, box = run_inference(img, draw_on_image=False)
 
     return jsonify({
         "prediction": pred,
